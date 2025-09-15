@@ -1,0 +1,99 @@
+<!-- Future Self Prompt: Core Architecture for AnimeReels Frontend
+
+Hello, Gemini. You are about to modify the AnimeReels project. Before you write any code, review this document carefully. This project is stable but has complex, interconnected parts. Deviating from these principles will re-introduce critical bugs.
+
+List of Core Features
+Personalized Reel Generation: Fetches an initial reel from the backend based on user-provided likes, dislikes, and genres.
+
+Bashboard Panel: A sidebar that displays all loaded recommendations, sorted by a calculated score, and shows icons for user interactions.
+
+Dynamic Re-scoring: The entire Bashboard re-calculates scores and re-sorts in real-time when the user provides strong feedback (like/dislike/save).
+
+Dynamic Reel Re-ordering: After a re-score, the upcoming reel queue is re-ordered to place the new highest-ranked anime next.
+
+Interaction Tracking & Feedback:
+
+Explicit signals (Like, Dislike, Save buttons).
+
+Implicit signals ("Watched long enough", "scrolled past quickly").
+
+All signals are tracked with icons on the Bashboard.
+
+Content Fetching: New recommendations are automatically fetched and added to the queue after strong feedback (Like, Dislike, Save).
+
+Player Controls:
+
+Mute/Unmute functionality.
+
+2x speed on right-side click-and-hold.
+
+Explicit Content Filter: A toggle on the setup screen to filter genres like "Ecchi" by default.
+
+YouTube Player Lifecycle Management:
+
+Initial preloading of the first ~10 videos for a fast startup.
+
+Aggressive destruction of off-screen players to manage a hidden API resource limit.
+
+Session Management: An exit button to clear the temporary user and all data from the database.
+
+Core Architectural Principles
+1. Master Script Structure (NON-NEGOTIABLE):
+The script uses a simple, three-stage structure. DO NOT DEVIATE.
+
+STATE & GLOBAL VARS: All state variables (currentUserId) and shared DOM element variables (reelContainer, intersectionObserver) are declared with let at the top of the script.
+
+FUNCTION DEFINITIONS: All functions (onGenerateReel, sendFeedbackSignal) are defined in the global scope using function name() {}. Do not nest them in objects or other initializers.
+
+DOM INITIALIZATION: A single document.addEventListener('DOMContentLoaded', ...) at the bottom is used to assign elements to the global variables and attach all event listeners.
+
+2. State Management is Key:
+Remember the "sources of truth":
+
+userTasteProfile: The authoritative taste data. It comes only from the backend.
+
+animeDetailsCache: Stores static info (title, keywords, genres) for every anime loaded. Use this to get anime names for the Bashboard, not the DOM.
+
+recommendationScores: The dynamic scores. This is the source of truth for the Bashboard's order. It is updated only by rescoreAllVisibleReels().
+
+recommendationSignals: Tracks only the visual icons for the Bashboard. This is updated instantly for immediate UI feedback.
+
+3. The Feedback & Re-Scoring Loop (CRITICAL):
+The app uses a single, unified sendFeedbackSignal function to handle a complex loop.
+
+Preventing Race Conditions:
+
+A global lock, isFeedbackLocked, is essential.
+
+The sendFeedbackSignal function is the only function that sets and releases this lock in a try...finally block.
+
+Crucially, automatic background events (watched_10_seconds) MUST check if (isFeedbackLocked) return; before calling the function. This gives user-initiated clicks priority.
+
+The Flow:
+
+An event (click or automatic) calls sendFeedbackSignal.
+
+The function locks the system.
+
+Instant UI Change: It immediately updates recommendationSignals (for the icon) and calls updateRankingPanel(). It does NOT modify the score directly.
+
+Authoritative Backend Sync: It awaits the backend /api/feedback.
+
+Conditional Heavy Lifting: Only if the event was a user click (not automatic), it uses the returned profile to call rescoreAllVisibleReels(), which recalculates all scores from scratch.
+
+The lock is released.
+
+4. Event Handling Rules:
+
+When adding broad event listeners to a parent (like mousedown on reelContainer), always add a guard clause at the top (e.g., if (e.target.closest('.action-btn') || e.target.closest('.show-details-btn')) return;) to ignore clicks on specific children and prevent conflicts.
+
+5. YouTube Player Lifecycle & Audio Management (CRITICAL):
+The audio system is fragile. The solution is a three-part system.
+
+Root Cause: The YT IFrame API has a hidden limit of ~4-6 active players.
+
+Part 1: Browser Audio Context Unlock: A silent HTML5 <audio> element is played for a millisecond on the very first onToggleMute call to grant page-wide audio permission.
+
+Part 2: Initial Player Priming: The preloadInitialReels function should only perform the aggressive unMute/play/pause/mute sequence on the single, very first video player inside onGenerateReel. Priming all players is too slow and causes the loading screen to hang.
+
+Part 3: Active Player Management & Destruction: The IntersectionObserver must destroy off-screen players. The logic defines a "safe zone" (current, previous, next two reels) and actively destroys any player instance not in this zone. This is the key to preventing the audio bug during long scrolling sessions. -->
