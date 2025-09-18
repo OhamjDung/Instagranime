@@ -63,7 +63,7 @@
     <script src="https://www.youtube.com/iframe_api"></script>
     <script>
         // --- CONFIG & STATE ---
-        const API_BASE_URL = 'http://127.0.0.1:5000';
+        const API_BASE_URL = 'https://instagranime-1.onrender.com';
         let currentUserId = null, players = {}, isMuted = true, recommendationScores = {}, recommendationSignals = {}, seenAnimeIds = new Set(), isRefreshing = false, currentlyVisibleReel = null, progressCheckIntervals = {}, animeDetailsCache = {}, userTasteProfile = {}, isApiReady = false, hasUnlockedAudio = false, isFeedbackLocked = false;
         let apiReadyPromise = new Promise(resolve => { window.onYouTubeIframeAPIReady = () => { isApiReady = true; resolve(); }; });
         
