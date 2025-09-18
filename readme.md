@@ -1,6 +1,4 @@
-===================================================
   Instagranime - A Personalized Anime Recommendation Engine
-===================================================
 
 Project Overview
 ----------------
