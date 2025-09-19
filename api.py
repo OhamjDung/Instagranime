@@ -93,12 +93,17 @@ def search_genres():
 def search_anime():
     query = request.args.get('q', '')
     if len(query) < 2: return jsonify([])
+    
     connection = get_db_connection()
     if not connection: return jsonify({"error": "Database connection failed"}), 500
-    cursor = connection.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    # FIX: Use a DictCursor, consistent with other functions
+    cursor = connection.cursor(cursor_factory=psycopg2.extras.DictCursor) 
     try:
-        cursor.execute("SELECT title FROM animes WHERE title LIKE %s AND promo_link IS NOT NULL AND promo_link != '' LIMIT 5", (f"%{query}%",))
-        results = [row['title'] for row in cursor.fetchall()]
+        cursor.execute("SELECT title FROM animes WHERE title ILIKE %s AND promo_link IS NOT NULL AND promo_link != '' LIMIT 5", (f"%{query}%",))
+        
+        # FIX: Access the result by column name 'title'
+        results = [row['title'] for row in cursor.fetchall()] 
         return jsonify(results)
     except Exception as e:
         print(f"An error occurred in /api/search_anime: {e}")
@@ -107,7 +112,6 @@ def search_anime():
         if connection:
             cursor.close()
             connection.close()
-
 
 @app.route('/api/generate_reel', methods=['POST'])
 def generate_reel():
