@@ -17,13 +17,14 @@ CORS(app)
 def get_db_connection():
     """Establishes a connection to the PostgreSQL database."""
     try:
+        # Construct the connection string from .env variables
         dsn = (
             f"dbname='{os.getenv('DB_NAME')}' "
             f"user='{os.getenv('DB_USER')}' "
             f"password='{os.getenv('DB_PASSWORD')}' "
             f"host='{os.getenv('DB_HOST')}' "
             f"port='{os.getenv('DB_PORT')}' "
-            f"sslmode='require'"
+            f"sslmode='require'"  # <-- THE FIX IS HERE
         )
         connection = psycopg2.connect(dsn)
         return connection
@@ -31,6 +32,7 @@ def get_db_connection():
         print(f"Error connecting to database: {err}")
         return None
 
+# (The rest of the file is unchanged)
 ALL_GENRES = [
     "Action", "Adventure", "Avant Garde", "Award Winning", "Boys Love", "Comedy", 
     "Drama", "Fantasy", "Girls Love", "Gourmet", "Horror", "Mystery", "Romance", 
@@ -93,17 +95,12 @@ def search_genres():
 def search_anime():
     query = request.args.get('q', '')
     if len(query) < 2: return jsonify([])
-    
     connection = get_db_connection()
     if not connection: return jsonify({"error": "Database connection failed"}), 500
-    
-    # FIX: Use a DictCursor, consistent with other functions
-    cursor = connection.cursor(cursor_factory=psycopg2.extras.DictCursor) 
+    cursor = connection.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
         cursor.execute("SELECT title FROM animes WHERE title ILIKE %s AND promo_link IS NOT NULL AND promo_link != '' LIMIT 5", (f"%{query}%",))
-        
-        # FIX: Access the result by column name 'title'
-        results = [row['title'] for row in cursor.fetchall()] 
+        results = [row['title'] for row in cursor.fetchall()]
         return jsonify(results)
     except Exception as e:
         print(f"An error occurred in /api/search_anime: {e}")
@@ -112,6 +109,7 @@ def search_anime():
         if connection:
             cursor.close()
             connection.close()
+
 
 @app.route('/api/generate_reel', methods=['POST'])
 def generate_reel():
@@ -238,7 +236,6 @@ def handle_feedback():
     user_id = data.get('user_id')
     anime_id = data.get('animeId')
     reason = data.get('reason')
-    # signal_type is sent from JS but not needed here if we derive from reason
     connection = get_db_connection()
     if not connection: return jsonify({"error": "Database connection failed"}), 500
     cursor = connection.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -252,7 +249,7 @@ def handle_feedback():
             if reason == 'like_button': modifier = 1
             elif reason == 'not_interested_button': modifier = -2
             elif reason == 'save_to_watchlist': modifier = 0.5
-            else: modifier = 0 # No change for 'watched_10_seconds', etc.
+            else: modifier = 0
             if modifier != 0:
                 if anime_keywords.get('positive_keywords'):
                     for keyword in anime_keywords['positive_keywords'].split(', '):
