@@ -17,14 +17,16 @@ CORS(app)
 def get_db_connection():
     """Establishes a connection to the PostgreSQL database."""
     try:
-        # Construct the connection string from .env variables
+        # --- MODIFIED: Reads the SSL mode from .env, defaults to 'require' for production ---
+        ssl_mode = os.getenv('DB_SSLMODE', 'require')
+
         dsn = (
             f"dbname='{os.getenv('DB_NAME')}' "
             f"user='{os.getenv('DB_USER')}' "
             f"password='{os.getenv('DB_PASSWORD')}' "
             f"host='{os.getenv('DB_HOST')}' "
             f"port='{os.getenv('DB_PORT')}' "
-            f"sslmode='require'"  # <-- THE FIX IS HERE
+            f"sslmode='{ssl_mode}'"  # Use the variable here
         )
         connection = psycopg2.connect(dsn)
         return connection
@@ -32,11 +34,10 @@ def get_db_connection():
         print(f"Error connecting to database: {err}")
         return None
 
-# (The rest of the file is unchanged)
 ALL_GENRES = [
-    "Action", "Adventure", "Avant Garde", "Award Winning", "Boys Love", "Comedy", 
-    "Drama", "Fantasy", "Girls Love", "Gourmet", "Horror", "Mystery", "Romance", 
-    "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Suspense", "Ecchi", 
+    "Action", "Adventure", "Avant Garde", "Award Winning", "Boys Love", "Comedy",
+    "Drama", "Fantasy", "Girls Love", "Gourmet", "Horror", "Mystery", "Romance",
+    "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Suspense", "Ecchi",
     "Erotica", "Hentai"
 ]
 EXPLICIT_GENRES = "'Ecchi', 'Erotica', 'Hentai'"
@@ -138,11 +139,14 @@ def generate_reel():
             connection.commit()
             taste_profile = calculate_initial_taste_profile(cursor, liked_anime, disliked_anime)
             profile_json = json.dumps(taste_profile)
+            # --- MODIFIED: Added last_updated to the query ---
             cursor.execute("""
-                INSERT INTO user_taste_profiles (user_id, taste_profile) 
-                VALUES (%s, %s)
+                INSERT INTO user_taste_profiles (user_id, taste_profile, last_updated) 
+                VALUES (%s, %s, NOW())
                 ON CONFLICT (user_id) 
-                DO UPDATE SET taste_profile = EXCLUDED.taste_profile;
+                DO UPDATE SET 
+                    taste_profile = EXCLUDED.taste_profile,
+                    last_updated = NOW();
             """, (user_id, profile_json))
             connection.commit()
         
@@ -154,9 +158,22 @@ def generate_reel():
             for row in cursor.fetchall():
                 comprehensive_seen_ids.add(row['anime_id'])
 
-        query = "SELECT a.*, STRING_AGG(g.name, ', ') as anime_genres FROM animes a LEFT JOIN anime_genres ag ON a.anime_id = ag.anime_id LEFT JOIN genres g ON ag.genre_id = g.genre_id"
+        # --- FIX: Refactored SQL query for PostgreSQL compatibility ---
+        query_base = """
+            WITH genre_agg AS (
+                SELECT 
+                    ag.anime_id, 
+                    STRING_AGG(g.name, ', ') as anime_genres
+                FROM anime_genres ag
+                JOIN genres g ON ag.genre_id = g.genre_id
+                GROUP BY ag.anime_id
+            )
+            SELECT a.*, ga.anime_genres
+            FROM animes a
+            LEFT JOIN genre_agg ga ON a.anime_id = ga.anime_id
+        """
         params = []
-        where_clauses = ["a.promo_link IS NOT NULL AND a.promo_link != ''"] 
+        where_clauses = ["a.promo_link IS NOT NULL AND a.promo_link != ''"]
         if not allow_explicit:
             where_clauses.append(f"a.anime_id NOT IN (SELECT ag.anime_id FROM anime_genres ag JOIN genres g ON ag.genre_id = g.genre_id WHERE g.name IN ({EXPLICIT_GENRES}))")
         if genres:
@@ -169,9 +186,9 @@ def generate_reel():
             params.extend(list(comprehensive_seen_ids))
         
         if where_clauses:
-            query += " WHERE " + " AND ".join(where_clauses)
+            query_base += " WHERE " + " AND ".join(where_clauses)
 
-        query += " GROUP BY a.anime_id ORDER BY a.mean_score DESC NULLS LAST LIMIT 500"
+        query = query_base + " ORDER BY a.mean_score DESC NULLS LAST LIMIT 500"
         cursor.execute(query, tuple(params))
         candidates = cursor.fetchall()
 
@@ -195,7 +212,20 @@ def generate_reel():
             final_recommendations = positive_recommendations[:15]
         else:
             recommendation_type = "fallback"
-            fallback_query = "SELECT a.*, STRING_AGG(g.name, ', ') as anime_genres FROM animes a LEFT JOIN anime_genres ag ON a.anime_id = ag.anime_id LEFT JOIN genres g ON ag.genre_id = g.genre_id"
+            # --- FIX: Also refactor the fallback query for PostgreSQL ---
+            fallback_query_base = """
+                WITH genre_agg AS (
+                    SELECT 
+                        ag.anime_id, 
+                        STRING_AGG(g.name, ', ') as anime_genres
+                    FROM anime_genres ag
+                    JOIN genres g ON ag.genre_id = g.genre_id
+                    GROUP BY ag.anime_id
+                )
+                SELECT a.*, ga.anime_genres
+                FROM animes a
+                LEFT JOIN genre_agg ga ON a.anime_id = ga.anime_id
+            """
             fallback_params = []
             fallback_where = ["a.promo_link IS NOT NULL AND a.promo_link != ''"]
             if not allow_explicit:
@@ -205,8 +235,9 @@ def generate_reel():
                 fallback_where.append(f"a.anime_id NOT IN ({id_placeholders})")
                 fallback_params.extend(list(comprehensive_seen_ids))
             if fallback_where:
-                fallback_query += " WHERE " + " AND ".join(fallback_where)
-            fallback_query += " GROUP BY a.anime_id ORDER BY a.overal_rank ASC NULLS LAST LIMIT 15"
+                fallback_query_base += " WHERE " + " AND ".join(fallback_where)
+            
+            fallback_query = fallback_query_base + " ORDER BY a.overal_rank ASC NULLS LAST LIMIT 15"
             cursor.execute(fallback_query, tuple(fallback_params))
             fallback_candidates = cursor.fetchall()
             for anime in fallback_candidates:
@@ -258,10 +289,13 @@ def handle_feedback():
                     for keyword in anime_keywords['negative_keywords'].split(', '):
                         if keyword: taste_profile[keyword] -= modifier
         
+        # --- MODIFIED: Added last_updated to the query ---
         cursor.execute(
             """
-            INSERT INTO user_taste_profiles (user_id, taste_profile) VALUES (%s, %s)
-            ON CONFLICT (user_id) DO UPDATE SET taste_profile = EXCLUDED.taste_profile;
+            INSERT INTO user_taste_profiles (user_id, taste_profile, last_updated) VALUES (%s, %s, NOW())
+            ON CONFLICT (user_id) DO UPDATE SET 
+                taste_profile = EXCLUDED.taste_profile,
+                last_updated = NOW();
             """,
             (user_id, json.dumps(dict(taste_profile)))
         )
