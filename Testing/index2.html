@@ -70,6 +70,16 @@
     width: 14px;
     height: 14px;
 }
+
+.pop-in {
+    animation: popIn 0.2s ease-out;
+}
+
+@keyframes popIn {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.2); }
+    100% { transform: scale(1); }
+}
     </style>
 </head>
 <body class="bg-gray-900 text-white h-full antialiased overflow-hidden flex">
@@ -120,12 +130,9 @@
         <button id="show-saved-button" title="Show Saved Animes" class="bg-black/30 p-2.5 rounded-full hover:bg-black/50 transition-all">
             <i data-lucide="bookmark-check" class="w-5 h-5"></i>
         </button>
-        <button id="unmute-button" title="Unmute Video" class="bg-black/30 p-2.5 rounded-full hover:bg-black/50 transition-all">
-            <i data-lucide="volume-x" class="w-5 h-5"></i>
-        </button>
+
     </div>
     
-    <div id="unmute-overlay" class="absolute inset-0 bg-black/50 flex items-center justify-center z-30 cursor-pointer"><div class="text-center"><i data-lucide="volume-x" class="w-16 h-16 mx-auto"></i><p class="mt-4 font-semibold">Tap to Unmute</p></div></div>
 </div>
     </div>
     
@@ -137,7 +144,7 @@
     <script src="https://www.youtube.com/iframe_api"></script>
  <script src="https://www.youtube.com/iframe_api"></script>
 <script>
-    const API_BASE_URL = 'https://instagranime-1.onrender.com';
+    const API_BASE_URL = 'http://127.0.0.1:5000';
     
     let currentUserId = null, players = {}, recommendationScores = {}, recommendationSignals = {}, seenAnimeIds = new Set(), isRefreshing = false, currentlyVisibleReel = null, progressCheckIntervals = {}, animeDetailsCache = {};
     let isApiReady = false, isFeedbackLocked = false;
@@ -262,6 +269,33 @@
        }
     }
 
+    function createPlayer(animeId, videoId, isPreloading = false) {
+    return new YT.Player(`player-${animeId}`, {
+        height: '100%',
+        width: '100%',
+        videoId: videoId,
+        playerVars: {
+            'autoplay': isPreloading ? 0 : 1,
+            'controls': 0,
+            'showinfo': 0,
+            'rel': 0,
+            'loop': 1,
+            'playlist': videoId,
+            'mute': 0,
+            'enablejsapi': 1
+        },
+        events: {
+            'onReady': (event) => {
+                console.log(`Player ${animeId} ready (preload: ${isPreloading})`);
+                // First video will autoplay via playerVars
+            },
+            'onError': (event) => {
+                console.error(`YouTube player error for ${animeId}:`, event.data);
+            }
+        }
+    });
+}
+
     async function refreshRecommendations() {
         if (isRefreshing) return;
         isRefreshing = true;
@@ -285,38 +319,145 @@
         }
     }
 
-    async function onGenerateReel() {
-        const username = inputs.username.value.trim();
-        if (!username) { alert("Please enter a username."); return; }
-        const payload = {
-            username,
-            liked_anime: inputs.liked.getTags(),
-            disliked_anime: inputs.disliked.getTags(),
-            seen_anime_ids: [],
-            allow_explicit: document.getElementById('explicit-toggle').checked,
-            genres: inputs.genres.getTags()
-        };
-        toggleLoading(true);
-        try {
-            const response = await fetch(`${API_BASE_URL}/api/generate_reel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            const data = await response.json();
-            currentUserId = data.user_id;
-            initialLoadingOverlay.classList.remove('hidden');
-            setupScreen.classList.add('hidden');
-            loadReels(data.recommendations);
-            await preloadInitialReels(data.recommendations);
-            initialLoadingOverlay.classList.add('hidden');
-            reelsScreen.classList.remove('hidden');
-            reelsScreen.classList.add('flex');
-            rankingPanelContainer.classList.remove('hidden');
-        } catch (error) {
-            console.error('Failed to fetch recommendations:', error);
-            alert(`Error: ${error.message}`);
-        } finally {
-            toggleLoading(false);
-        }
+ async function onGenerateReel() {
+    const username = inputs.username.value.trim();
+    if (!username) { 
+        alert("Please enter a username."); 
+        return; 
     }
+    
+    const payload = {
+        username,
+        liked_anime: inputs.liked.getTags(),
+        disliked_anime: inputs.disliked.getTags(),
+        seen_anime_ids: [],
+        allow_explicit: document.getElementById('explicit-toggle').checked,
+        genres: inputs.genres.getTags()
+    };
+    
+    toggleLoading(true);
+    initialLoadingOverlay.classList.remove('hidden');
+
+    try {
+        // Add timeout to the fetch request
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+        
+        const response = await fetch(`${API_BASE_URL}/api/generate_reel`, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify(payload),
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        currentUserId = data.user_id;
+        
+        setupScreen.classList.add('hidden');
+        loadReels(data.recommendations);
+        await preloadInitialReels(data.recommendations);
+        
+        reelsScreen.classList.remove('hidden');
+        reelsScreen.classList.add('flex');
+        rankingPanelContainer.classList.remove('hidden');
+        
+    } catch (error) {
+        console.error('Failed to fetch recommendations:', error);
+        
+        if (error.name === 'AbortError') {
+            alert('Request timed out. The server is taking too long to respond. Please try again.');
+        } else {
+            alert(`Error: ${error.message}`);
+        }
+        
+        // Show retry button instead of automatically reloading
+        showRetryOption();
+    } finally {
+        initialLoadingOverlay.classList.add('hidden'); 
+        toggleLoading(false);
+    }
+}
+
+// New function to show retry option instead of auto-reload
+function showRetryOption() {
+    const retryOverlay = document.createElement('div');
+    retryOverlay.className = 'fixed inset-0 bg-gray-900/90 backdrop-blur-sm flex flex-col items-center justify-center z-50';
+    retryOverlay.innerHTML = `
+        <div class="bg-gray-800 rounded-2xl p-8 max-w-md text-center">
+            <div class="text-red-400 mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+            </div>
+            <h3 class="text-xl font-bold mb-2">Generation Failed</h3>
+            <p class="text-gray-300 mb-6">The recommendation generation took too long or encountered an error.</p>
+            <div class="flex space-x-4">
+                <button id="retry-button" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300">
+                    Try Again
+                </button>
+                <button id="reload-button" class="flex-1 bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300">
+                    Start Over
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(retryOverlay);
+    
+    document.getElementById('retry-button').addEventListener('click', () => {
+        retryOverlay.remove();
+        onGenerateReel();
+    });
+    
+    document.getElementById('reload-button').addEventListener('click', () => {
+        window.location.reload();
+    });
+}
+
+// Also enhance the refreshRecommendations function with timeout
+async function refreshRecommendations() {
+    if (isRefreshing) return;
+    isRefreshing = true;
+    
+    const payload = {
+        user_id: currentUserId,
+        seen_anime_ids: Array.from(seenAnimeIds),
+        allow_explicit: document.getElementById('explicit-toggle').checked,
+        genres: inputs.genres.getTags()
+    };
+    
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        
+        const response = await fetch(`${API_BASE_URL}/api/generate_reel`, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify(payload),
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        const data = await response.json();
+        if (data.recommendations && data.recommendations.length > 0) {
+            appendReels(data.recommendations);
+        }
+    } catch (error) {
+        console.error("Failed to refresh recommendations:", error);
+        alert("Failed to get new recommendations. Please try again.");
+    } finally {
+        isRefreshing = false;
+    }
+}
 
     async function onExitSession() {
         if (currentUserId) {
@@ -527,88 +668,110 @@
 
     // This is the clean, corrected preload function
     async function preloadInitialReels(reels) {
-        if (!isApiReady) await apiReadyPromise;
-        const reelsToPreload = reels.slice(0, 5).filter(r => r.trailerId);
-        const preloadPromises = reelsToPreload.map(anime => {
-            return new Promise(resolve => {
-                // We use createPlayer to ensure consistent settings
-                players[anime.id] = createPlayer(anime.id, anime.trailerId, true);
-                // The onReady event in createPlayer will handle autoplaying the first video
-                resolve();
-            });
-        });
-        await Promise.all(preloadPromises);
-    }
-
-    // This is the clean, corrected player creation function
-    function createPlayer(animeId, videoId, isPreloading = false) {
-        return new YT.Player(`player-${animeId}`, {
-            height: '100%',
-            width: '100%',
-            videoId: videoId,
-            playerVars: {
-                'autoplay': 0, 'controls': 0, 'showinfo': 0, 'rel': 0,
-                'loop': 1, 'playlist': videoId, 'mute': 0
-            },
-            events: {
-                'onReady': (event) => {
-                    // Only the first, non-preloaded video should autoplay on ready.
-                    if (!isPreloading && activeReelId === animeId) {
-                        event.target.playVideo();
-                    }
-                }
-            }
-        });
-    }
+    if (!isApiReady) await apiReadyPromise;
     
+    // Only preload videos 2-5, not the first one
+    const reelsToPreload = reels.slice(1, 5).filter(r => r.trailerId);
+    
+    const preloadPromises = reelsToPreload.map(anime => {
+        return new Promise(resolve => {
+            players[anime.id] = createPlayer(anime.id, anime.trailerId, true);
+            setTimeout(resolve, 100); // Small delay to avoid overwhelming API
+        });
+    });
+    
+    await Promise.all(preloadPromises);
+    
+    // Force intersection check for first video
+    setTimeout(() => {
+        const firstReel = document.querySelector('.reel-item[data-anime-id]');
+        if (firstReel && intersectionObserver) {
+            intersectionObserver.unobserve(firstReel);
+            intersectionObserver.observe(firstReel);
+        }
+    }, 1000);
+}
     // This is the clean, corrected observer function
     function setupIntersectionObserver() {
-        if (intersectionObserver) intersectionObserver.disconnect();
-        intersectionObserver = new IntersectionObserver((entries) => {
-            const visibleEntry = entries.find(e => e.isIntersecting);
+    if (intersectionObserver) intersectionObserver.disconnect();
+    intersectionObserver = new IntersectionObserver((entries) => {
+        const visibleEntry = entries.find(e => e.isIntersecting);
 
-            if (visibleEntry) {
-                const newVisibleId = visibleEntry.target.dataset.animeId;
-                if (newVisibleId === activeReelId) return;
+        if (visibleEntry) {
+            const newVisibleId = visibleEntry.target.dataset.animeId;
+            if (newVisibleId === activeReelId) return;
 
-                if (activeReelId) {
-                    const oldPlayer = players[activeReelId];
-                    if (oldPlayer && typeof oldPlayer.stopVideo === 'function') oldPlayer.stopVideo();
-                    stopProgressCheck(activeReelId);
-                    
-                    const oldSignals = recommendationSignals[activeReelId] || new Set();
-                    if (oldSignals.size === 0) {
-                        const oldIdInt = parseInt(activeReelId, 10);
-                        sendFeedbackSignal(oldIdInt, 'scrolled_past', true).then(() => rescoreRemainingReels());
-                        seenAnimeIds.add(oldIdInt);
-                    }
+            // Stop previous video
+            if (activeReelId) {
+                const oldPlayer = players[activeReelId];
+                if (oldPlayer && typeof oldPlayer.stopVideo === 'function') {
+                    oldPlayer.stopVideo();
                 }
+                stopProgressCheck(activeReelId);
                 
-                activeReelId = newVisibleId;
-                currentlyVisibleReel = visibleEntry.target;
-                const animeIdInt = parseInt(activeReelId, 10);
-                seenAnimeIds.add(animeIdInt);
-
-                const trailerId = animeDetailsCache[activeReelId]?.trailerId;
-                let player = players[activeReelId];
-
-                if (trailerId && !player) {
-                    player = createPlayer(activeReelId, trailerId);
-                    players[activeReelId] = player;
-                }
-                
-                if (player && player.playVideo) {
-                    player.playVideo();
-                }
-
-                if (player) {
-                    startProgressCheck(activeReelId, player);
+                const oldSignals = recommendationSignals[activeReelId] || new Set();
+                if (oldSignals.size === 0) {
+                    const oldIdInt = parseInt(activeReelId, 10);
+                    sendFeedbackSignal(oldIdInt, 'scrolled_past', true).then(() => rescoreRemainingReels());
+                    seenAnimeIds.add(oldIdInt);
                 }
             }
-        }, { root: reelContainer, threshold: 0.7 });
+            
+            // Activate new video
+            activeReelId = newVisibleId;
+            currentlyVisibleReel = visibleEntry.target;
+            const animeIdInt = parseInt(activeReelId, 10);
+            seenAnimeIds.add(animeIdInt);
 
-        document.querySelectorAll('.reel-item[data-anime-id]').forEach(item => intersectionObserver.observe(item));
+            const trailerId = animeDetailsCache[activeReelId]?.trailerId;
+            let player = players[activeReelId];
+
+            // Create player if it doesn't exist
+            if (trailerId && !player) {
+                player = createPlayer(activeReelId, trailerId, false);
+                players[activeReelId] = player;
+            }
+            
+            // Play video with robust error handling
+            if (player) {
+                playVideoWithRetry(player, activeReelId);
+                startProgressCheck(activeReelId, player);
+            }
+        }
+    }, { root: reelContainer, threshold: 0.7 });
+
+    document.querySelectorAll('.reel-item[data-anime-id]').forEach(item => intersectionObserver.observe(item));
+}
+
+// New function to handle video playback with retry logic
+function playVideoWithRetry(player, animeId, retryCount = 0) {
+    if (retryCount >= 3) {
+        console.warn(`Failed to play video for anime ${animeId} after ${retryCount} attempts`);
+        return;
     }
+    
+    if (player && typeof player.playVideo === 'function') {
+        try {
+            const state = player.getPlayerState ? player.getPlayerState() : -1;
+            if (state !== 1) { // If not already playing
+                player.playVideo();
+                
+                // Verify playback started
+                setTimeout(() => {
+                    const newState = player.getPlayerState ? player.getPlayerState() : -1;
+                    if (newState !== 1 && retryCount < 2) {
+                        playVideoWithRetry(player, animeId, retryCount + 1);
+                    }
+                }, 500);
+            }
+        } catch (error) {
+            console.error(`Error playing video for ${animeId}:`, error);
+            if (retryCount < 2) {
+                setTimeout(() => playVideoWithRetry(player, animeId, retryCount + 1), 300);
+            }
+        }
+    }
+}
     
     function startProgressCheck(animeId, player) {
         stopProgressCheck(animeId);
@@ -631,14 +794,71 @@
         }
     }
 
-    function showSavedAnimesPopup() {
-        // This function's content is omitted for brevity but should be here
-    }
-    
-    function hideSavedAnimesPopup() {
-        // This function's content is omitted for brevity but should be here
-    }
-    
+function showSavedAnimesPopup() {
+
+        const popup = document.getElementById('saved-animes-popup');
+
+        const list = document.getElementById('saved-animes-list');
+
+        list.innerHTML = '';
+
+       
+
+        const savedAnimeIds = Object.keys(recommendationSignals).filter(id =>
+
+            recommendationSignals[id] && recommendationSignals[id].has('save_to_watchlist')
+
+        );
+
+
+
+        if (savedAnimeIds.length === 0) {
+
+            list.innerHTML = '<p class="text-gray-400 text-center p-4">No animes saved to your watchlist yet.</p>';
+
+        } else {
+
+            savedAnimeIds.forEach(id => {
+
+                const anime = animeDetailsCache[id];
+
+                if (anime) {
+
+                    const item = document.createElement('div');
+
+                    item.className = "flex items-center space-x-4 p-2 bg-gray-700 rounded-lg";
+
+                    const thumbnailUrl = anime.thumbnailUrl || 'https://via.placeholder.com/64';
+
+                    item.innerHTML = `
+
+                        <img src="${thumbnailUrl}" alt="${anime.title}" class="w-16 h-16 rounded object-cover">
+
+                        <p class="text-sm font-semibold flex-grow">${anime.title}</p>
+
+                    `;
+
+                    list.appendChild(item);
+
+                }
+
+            });
+
+        }
+
+        popup.classList.remove('hidden');
+
+        lucide.createIcons();
+
+    }
+
+   
+
+    function hideSavedAnimesPopup() {
+
+        document.getElementById('saved-animes-popup').classList.add('hidden');
+
+    }
     document.addEventListener('DOMContentLoaded', () => {
         checkApiStatus(); 
         lucide.createIcons();
@@ -667,21 +887,118 @@
         generateButton.addEventListener('click', onGenerateReel);
         exitButton.addEventListener('click', onExitSession);
     
-        async function handleAction(animeId, reason, reelItem, btnElement) {
-            // This function's content is omitted for brevity but should be here
+
+
+        async function handleAction(animeId, reason, reelItem, btnElement) {
+    seenAnimeIds.add(animeId);
+    const feedbackData = await sendFeedbackSignal(animeId, reason);
+    
+    if (feedbackData) {
+        if (reason === 'like_button' || reason === 'super_like_button' || reason === 'not_interested_button') {
+            if (feedbackData.affected_ids) {
+                feedbackData.affected_ids.forEach(id => {
+                    const itemToRemove = document.querySelector(`.reel-item[data-anime-id='${id}']`);
+                    if (itemToRemove) {
+                        intersectionObserver.unobserve(itemToRemove);
+                        itemToRemove.remove();
+                    }
+                    delete players[id];
+                    if (reason === 'not_interested_button') {
+                        delete recommendationScores[id];
+                        delete animeDetailsCache[id];
+                        delete recommendationSignals[id];
+                    }
+                });
+            }
+            const nextElement = reelItem.nextElementSibling;
+            if (nextElement) {
+                nextElement.scrollIntoView({ behavior: 'smooth' });
+            }
+            refreshRecommendations();
+        } else if (reason === 'save_to_watchlist') {
+            btnElement.classList.toggle('active-btn');
+            const nextElement = reelItem.nextElementSibling;
+            if (nextElement) {
+                nextElement.scrollIntoView({ behavior: 'smooth' });
+            }
+            refreshRecommendations();
+        }
+        updateRankingPanel();
+    }
+    rescoreRemainingReels();
+}
+
+
+
+reelContainer.addEventListener('click', async (e) => {
+    const detailsBtn = e.target.closest('.show-details-btn');
+    if (detailsBtn) {
+        detailsBtn.closest('.reel-item').querySelector('.details-panel').classList.toggle('hidden');
+        return;
+    }
+    const btn = e.target.closest('.action-btn');
+    if (!btn) return;
+    const reelItem = btn.closest('.reel-item');
+    if (!reelItem) return;
+
+    // Add animation effect
+    btn.classList.add('pop-in');
+    setTimeout(() => { btn.classList.remove('pop-in'); }, 200);
+
+    const animeId = parseInt(reelItem.dataset.animeId, 10);
+    
+    if (btn.classList.contains('like-btn')) {
+        clearTimeout(likeClickTracker.timer);
+        if (likeClickTracker.animeId === animeId) {
+            likeClickTracker.count++;
+        } else {
+            likeClickTracker.animeId = animeId;
+            likeClickTracker.count = 1;
         }
 
-        reelContainer.addEventListener('click', async (e) => {
-            // This function's content is omitted for brevity but should be here
-        });
-        
-        reelContainer.addEventListener('mousedown', (e) => {
-             // This function's content is omitted for brevity but should be here
-        });
-        document.addEventListener('mouseup', () => {
-             // This function's content is omitted for brevity but should be here
-        });
-    });
+        if (likeClickTracker.count >= 3) {
+            showSuperLikeToast();
+            await handleAction(animeId, 'super_like_button', reelItem, btn);
+            likeClickTracker = { animeId: null, count: 0, timer: null };
+        } else {
+            likeClickTracker.timer = setTimeout(async () => {
+                for (let i = 0; i < likeClickTracker.count; i++) {
+                    await handleAction(animeId, 'like_button', reelItem, btn);
+                }
+                likeClickTracker = { animeId: null, count: 0, timer: null };
+            }, 400);
+        }
+        return;
+    } else if (btn.classList.contains('save-btn')) {
+        await handleAction(animeId, 'save_to_watchlist', reelItem, btn);
+        return;
+    } else if (btn.classList.contains('not-interested-btn')) {
+        await handleAction(animeId, 'not_interested_button', reelItem, btn);
+        return;
+    }
+});
+
+reelContainer.addEventListener('mousedown', (e) => {
+     if (e.target.closest('.action-btn') || e.target.closest('.show-details-btn')) return;
+     if (e.clientX > reelContainer.offsetWidth / 2) {
+         if (currentlyVisibleReel) {
+             const activePlayer = players[currentlyVisibleReel.dataset.animeId];
+             if (activePlayer && typeof activePlayer.setPlaybackRate === 'function') {
+                 activePlayer.setPlaybackRate(2);
+             }
+         }
+     }
+});
+document.addEventListener('mouseup', () => {
+    if (currentlyVisibleReel) {
+        const activePlayer = players[currentlyVisibleReel.dataset.animeId];
+        if (activePlayer && typeof activePlayer.setPlaybackRate === 'function') {
+            activePlayer.setPlaybackRate(1);
+        }
+    }
+});
+});
+
 </script>
 
     <div id="saved-animes-popup" class="fixed inset-0 z-[100] hidden bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
