@@ -75,6 +75,11 @@
     animation: popIn 0.2s ease-out;
 }
 
+.tab-btn.active-tab {
+    color: #a5b4fc; /* indigo-300 */
+    border-bottom: 2px solid #6366f1; /* indigo-500 */
+}
+
 @keyframes popIn {
     0% { transform: scale(1); }
     50% { transform: scale(1.2); }
@@ -139,21 +144,29 @@
 </div>
     </div>
     
-<div id="ranking-panel-container" class="fixed top-0 right-0 h-full w-full max-w-sm bg-gray-800/80 backdrop-blur-sm border-l border-gray-700 z-40 p-4 ranking-panel overflow-y-auto transform translate-x-full transition-transform duration-300 ease-in-out md:relative md:w-64 md:translate-x-0 md:flex-shrink-0 md:flex md:flex-col">
-    <div class="flex justify-between items-center mb-4">
-        <h3 class="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-500">Your Dashboard</h3>
-        <button id="close-dashboard-button" class="p-2 -mr-2 rounded-full hover:bg-gray-700 transition-colors md:hidden">
-            <i data-lucide="x" class="w-5 h-5"></i>
-        </button>
+<div id="ranking-panel-container" 
+     class="fixed inset-0 bg-black/50 z-30 hidden 
+            md:relative md:inset-auto md:flex md:w-64 md:bg-transparent md:z-auto">
+    
+    <div id="ranking-panel-content" 
+         class="fixed top-0 right-0 h-full w-full max-w-sm bg-gray-800 border-l border-gray-700 p-4 transform translate-x-full transition-transform duration-300 ease-in-out
+                md:relative md:h-full md:w-full md:max-w-none md:transform-none md:border-l-0 md:bg-gray-800/50 md:border-l md:border-gray-700">
+        
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-500">Your Dashboard</h3>
+            <button id="close-dashboard-button" class="p-2 -mr-2 rounded-full hover:bg-gray-700 transition-colors md:hidden">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+        <div id="ranking-list" class="flex-grow overflow-y-auto"></div>
     </div>
-    <div id="ranking-list" class="flex-grow"></div>
 </div>
 
     <script src="https://www.youtube.com/iframe_api"></script>
  <script src="https://www.youtube.com/iframe_api"></script>
 <script>
-    // const API_BASE_URL = 'https://instagranime-1.onrender.com';
-    const API_BASE_URL = 'http://127.0.0.1:5000'
+    const API_BASE_URL = 'https://instagranime-1.onrender.com';
+    // const API_BASE_URL = 'http://127.0.0.1:5000'
     
     let currentUserId = null, players = {}, recommendationScores = {}, recommendationSignals = {}, seenAnimeIds = new Set(), isRefreshing = false, currentlyVisibleReel = null, progressCheckIntervals = {}, animeDetailsCache = {};
     let isApiReady = false, isFeedbackLocked = false;
@@ -550,46 +563,41 @@ async function refreshRecommendations() {
 
         // UPDATED: Renders the suggestions and attaches the new event listeners.
         function renderSuggestions() {
-            suggestionsDiv.innerHTML = '';
-            if (currentlyDisplayedSuggestions.length > 0) {
-                suggestionsContainer.classList.remove('hidden');
-                currentlyDisplayedSuggestions.forEach(suggestion => {
-                    // Don't show a suggestion if it's already a liked tag
-                    if (tags.includes(suggestion)) {
-                        // If a displayed suggestion was just added, immediately replace it
-                        dismissAndReplaceSuggestion(suggestion);
-                        return; // Stop this render loop and let the recursive call handle it
-                    }
-
-                    const suggestionEl = document.createElement('div');
-                    suggestionEl.className = 'suggestion-tag';
-                    suggestionEl.textContent = suggestion;
-                    
-                    const removeIcon = document.createElement('div');
-                    removeIcon.className = "ml-2 cursor-pointer";
-                    removeIcon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
-
-                    // Event listener for DISMISSING a suggestion
-                    removeIcon.addEventListener('click', (e) => {
-                        e.stopPropagation(); // Prevents the whole tag from being clicked
-                        dismissAndReplaceSuggestion(suggestion);
-                    });
-
-                    suggestionEl.appendChild(removeIcon);
-                    
-                    // Event listener for ADDING a suggestion
-                    suggestionEl.addEventListener('click', () => {
-                        addTag(suggestion);
-                        // The `addTag` function will trigger a re-render automatically
-                    });
-
-                    suggestionsDiv.appendChild(suggestionEl);
-                });
-            } else {
-                suggestionsContainer.classList.add('hidden');
+    suggestionsDiv.innerHTML = '';
+    if (currentlyDisplayedSuggestions.length > 0) {
+        suggestionsContainer.classList.remove('hidden');
+        currentlyDisplayedSuggestions.forEach(suggestion => {
+            if (tags.includes(suggestion)) {
+                dismissAndReplaceSuggestion(suggestion);
+                return;
             }
-        }
-        
+            const suggestionEl = document.createElement('div');
+            suggestionEl.className = 'suggestion-tag';
+            suggestionEl.textContent = suggestion;
+            
+            const removeIcon = document.createElement('div');
+            // UPDATED LINE: Added classes for padding, rounding, and hover effect
+            removeIcon.className = "ml-2 p-1 rounded-full cursor-pointer transition-colors duration-200 hover:bg-red-500/50";
+            
+            removeIcon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+
+            removeIcon.addEventListener('click', (e) => {
+                e.stopPropagation();
+                dismissAndReplaceSuggestion(suggestion);
+            });
+
+            suggestionEl.appendChild(removeIcon);
+            
+            suggestionEl.addEventListener('click', () => {
+                addTag(suggestion);
+            });
+
+            suggestionsDiv.appendChild(suggestionEl);
+        });
+    } else {
+        suggestionsContainer.classList.add('hidden');
+    }
+}
         // --- Functions below are mostly unchanged, but `addTag` now triggers suggestion logic ---
 
         input.addEventListener('input', () => {
@@ -637,10 +645,7 @@ async function refreshRecommendations() {
                 renderTags();
 
                 if (inputId === 'liked-input') {
-                    // THE FIX: Add the new tag to the dismissed list *before* fetching.
-                    // This ensures the new suggestions are filtered correctly.
-                    globallyDismissedSuggestions.add(label);
-                    
+                    // This function now correctly triggers the fetch, which will handle all filtering.
                     clearTimeout(suggestionDebounceTimer);
                     suggestionDebounceTimer = setTimeout(fetchSuggestions, 500);
                 }
@@ -766,53 +771,68 @@ async function refreshRecommendations() {
     // This is the clean, corrected observer function
     function setupIntersectionObserver() {
     if (intersectionObserver) intersectionObserver.disconnect();
+
+    const options = {
+        root: reelContainer,
+        threshold: 0.7, // 70% of the item must be visible
+    };
+
     intersectionObserver = new IntersectionObserver((entries) => {
-        const visibleEntry = entries.find(e => e.isIntersecting);
+        entries.forEach(entry => {
+            const animeId = entry.target.dataset.animeId;
+            if (!animeId) return;
 
-        if (visibleEntry) {
-            const newVisibleId = visibleEntry.target.dataset.animeId;
-            if (newVisibleId === activeReelId) return;
+            // Get the player associated with this specific reel
+            const player = players[animeId];
 
-            // Stop previous video
-            if (activeReelId) {
-                const oldPlayer = players[activeReelId];
-                if (oldPlayer && typeof oldPlayer.stopVideo === 'function') {
-                    oldPlayer.stopVideo();
+            if (entry.isIntersecting) {
+                // --- This reel is NOW VISIBLE ---
+                activeReelId = animeId;
+                currentlyVisibleReel = entry.target;
+                const animeIdInt = parseInt(activeReelId, 10);
+                seenAnimeIds.add(animeIdInt);
+
+                // Get the trailer ID and the current player instance
+                const trailerId = animeDetailsCache[activeReelId]?.trailerId;
+                let currentPlayer = players[activeReelId];
+
+                // If the player doesn't exist yet, create it
+                if (trailerId && !currentPlayer) {
+                    currentPlayer = createPlayer(activeReelId, trailerId, false);
+                    players[activeReelId] = currentPlayer;
                 }
-                stopProgressCheck(activeReelId);
                 
-                const oldSignals = recommendationSignals[activeReelId] || new Set();
-                if (oldSignals.size === 0) {
-                    const oldIdInt = parseInt(activeReelId, 10);
-                    sendFeedbackSignal(oldIdInt, 'scrolled_past', true).then(() => rescoreRemainingReels());
-                    seenAnimeIds.add(oldIdInt);
+                // Play the video and start tracking its progress
+                if (currentPlayer) {
+                    playVideoWithRetry(currentPlayer, activeReelId);
+                    startProgressCheck(activeReelId, currentPlayer);
+                }
+
+            } else {
+                // --- This reel is NO LONGER VISIBLE ---
+                // Directly pause the player for the reel that just left the screen
+                if (player && typeof player.pauseVideo === 'function') {
+                    player.pauseVideo();
+                }
+                stopProgressCheck(animeId);
+                
+                // If the exiting reel was the active one, log a "scrolled_past" signal if no other action was taken
+                if(activeReelId === animeId) {
+                    const signals = recommendationSignals[animeId] || new Set();
+                    if (signals.size === 0) {
+                        const idInt = parseInt(animeId, 10);
+                        sendFeedbackSignal(idInt, 'scrolled_past', true).then(() => rescoreRemainingReels());
+                        seenAnimeIds.add(idInt);
+                    }
                 }
             }
-            
-            // Activate new video
-            activeReelId = newVisibleId;
-            currentlyVisibleReel = visibleEntry.target;
-            const animeIdInt = parseInt(activeReelId, 10);
-            seenAnimeIds.add(animeIdInt);
+        });
+    }, options);
 
-            const trailerId = animeDetailsCache[activeReelId]?.trailerId;
-            let player = players[activeReelId];
-
-            // Create player if it doesn't exist
-            if (trailerId && !player) {
-                player = createPlayer(activeReelId, trailerId, false);
-                players[activeReelId] = player;
-            }
-            
-            // Play video with robust error handling
-            if (player) {
-                playVideoWithRetry(player, activeReelId);
-                startProgressCheck(activeReelId, player);
-            }
-        }
-    }, { root: reelContainer, threshold: 0.7 });
-
-    document.querySelectorAll('.reel-item[data-anime-id]').forEach(item => intersectionObserver.observe(item));
+    // Observe all reel items that have an anime ID
+    document.querySelectorAll('.reel-item[data-anime-id]').forEach(item => {
+        intersectionObserver.observe(item);
+    });
 }
 
 // New function to handle video playback with retry logic
@@ -866,113 +886,145 @@ function playVideoWithRetry(player, animeId, retryCount = 0) {
         }
     }
 
+// This is a new helper function to avoid repeating code
+function renderSavedList(container, animeIds, emptyMessage) {
+    container.innerHTML = '';
+    if (animeIds.length === 0) {
+        container.innerHTML = `<p class="text-gray-400 text-center p-4">${emptyMessage}</p>`;
+        return;
+    }
+
+    animeIds.forEach(id => {
+        const anime = animeDetailsCache[id];
+        if (anime) {
+            const item = document.createElement('div');
+            item.className = "flex items-center space-x-4 p-2 bg-gray-700/50 rounded-lg";
+            const thumbnailUrl = anime.thumbnailUrl || 'https://via.placeholder.com/64';
+            item.innerHTML = `
+                <img src="${thumbnailUrl}" alt="${anime.title}" class="w-12 h-16 rounded object-cover flex-shrink-0">
+                <div class="flex-grow">
+                    <p class="text-sm font-semibold">${anime.title}</p>
+                    <p class="text-xs text-gray-400">${(anime.genres || '').split(',').slice(0, 3).join(', ')}</p>
+                </div>
+            `;
+            container.appendChild(item);
+        }
+    });
+}
+
+// Replace your old showSavedAnimesPopup function with this one
 function showSavedAnimesPopup() {
+    // 1. Filter the signals to get the IDs for each category
+    const watchlistIds = Object.keys(recommendationSignals).filter(id => 
+        recommendationSignals[id]?.has('save_to_watchlist')
+    );
+    const superLikeIds = Object.keys(recommendationSignals).filter(id => 
+        recommendationSignals[id]?.has('super_like_button')
+    );
+    const likeIds = Object.keys(recommendationSignals).filter(id => 
+        recommendationSignals[id]?.has('like_button') && !recommendationSignals[id]?.has('super_like_button')
+    );
 
-        const popup = document.getElementById('saved-animes-popup');
+    // 2. Get references to the list containers
+    const watchlistContainer = document.getElementById('watchlist-list');
+    const superLikesContainer = document.getElementById('super-likes-list');
+    const likesContainer = document.getElementById('likes-list');
 
-        const list = document.getElementById('saved-animes-list');
+    // 3. Render the content for each list
+    renderSavedList(watchlistContainer, watchlistIds, "You haven't added any anime to your watchlist yet.");
+    renderSavedList(superLikesContainer, superLikeIds, "You haven't super-liked any anime yet.");
+    renderSavedList(likesContainer, likeIds, "You haven't liked any anime yet.");
 
-        list.innerHTML = '';
-
-       
-
-        const savedAnimeIds = Object.keys(recommendationSignals).filter(id =>
-
-            recommendationSignals[id] && recommendationSignals[id].has('save_to_watchlist')
-
-        );
-
-
-
-        if (savedAnimeIds.length === 0) {
-
-            list.innerHTML = '<p class="text-gray-400 text-center p-4">No animes saved to your watchlist yet.</p>';
-
-        } else {
-
-            savedAnimeIds.forEach(id => {
-
-                const anime = animeDetailsCache[id];
-
-                if (anime) {
-
-                    const item = document.createElement('div');
-
-                    item.className = "flex items-center space-x-4 p-2 bg-gray-700 rounded-lg";
-
-                    const thumbnailUrl = anime.thumbnailUrl || 'https://via.placeholder.com/64';
-
-                    item.innerHTML = `
-
-                        <img src="${thumbnailUrl}" alt="${anime.title}" class="w-16 h-16 rounded object-cover">
-
-                        <p class="text-sm font-semibold flex-grow">${anime.title}</p>
-
-                    `;
-
-                    list.appendChild(item);
-
-                }
-
-            });
-
-        }
-
-        popup.classList.remove('hidden');
-
-        lucide.createIcons();
-
-    }
-
-   
+    // 4. Show the popup and refresh icons
+    document.getElementById('saved-animes-popup').classList.remove('hidden');
+    lucide.createIcons();
+}
 
     function hideSavedAnimesPopup() {
 
         document.getElementById('saved-animes-popup').classList.add('hidden');
 
     }
-    document.addEventListener('DOMContentLoaded', () => {
-        checkApiStatus(); 
-        lucide.createIcons();
-        setupScreen = document.getElementById('setup-screen');
-        reelsScreen = document.getElementById('reels-screen');
-        generateButton = document.getElementById('generate-button');
-        reelContainer = document.getElementById('reel-container');
-        exitButton = document.getElementById('exit-session-button');
-        rankingPanelContainer = document.getElementById('ranking-panel-container');
-        initialLoadingOverlay = document.getElementById('initial-loading-overlay');
 
-        const toggleDashboardButton = document.getElementById('toggle-dashboard-button');
+document.addEventListener('DOMContentLoaded', () => {
+    // --- 1. Initial Setup and Element Caching ---
+    checkApiStatus(); 
+    lucide.createIcons();
+    setupScreen = document.getElementById('setup-screen');
+    reelsScreen = document.getElementById('reels-screen');
+    generateButton = document.getElementById('generate-button');
+    reelContainer = document.getElementById('reel-container');
+    exitButton = document.getElementById('exit-session-button');
+    initialLoadingOverlay = document.getElementById('initial-loading-overlay');
+
+    // --- 2. Input Fields Initialization ---
+    inputs = {
+        username: document.getElementById('username-input'),
+        genres: setupTagInput('genres-input', 'genres-tags', 'bg-indigo-500/80', 'genres-autocomplete', '/api/search_genres'),
+        liked: setupTagInput('liked-input', 'liked-tags', 'bg-green-500/80', 'liked-autocomplete', '/api/search_anime'),
+        disliked: setupTagInput('disliked-input', 'disliked-tags', 'bg-red-500/80', 'disliked-autocomplete', '/api/search_anime')
+    };
+ 
+    // --- 3. Main Button Event Listeners ---
+    generateButton.addEventListener('click', onGenerateReel);
+    exitButton.addEventListener('click', onExitSession);
+
+    // --- 4. Mobile Dashboard Logic ---
+    const toggleDashboardButton = document.getElementById('toggle-dashboard-button');
     const closeDashboardButton = document.getElementById('close-dashboard-button');
-
-    if (toggleDashboardButton && rankingPanelContainer) {
-        toggleDashboardButton.addEventListener('click', () => {
-            rankingPanelContainer.classList.remove('translate-x-full');
-        });
-    }
-
-    if (closeDashboardButton && rankingPanelContainer) {
-        closeDashboardButton.addEventListener('click', () => {
-            rankingPanelContainer.classList.add('translate-x-full');
-        });
-    }
-        
-        // Remove references to mute button and overlay if they don't exist
-        const showSavedButton = document.getElementById('show-saved-button');
-        if(showSavedButton) showSavedButton.addEventListener('click', showSavedAnimesPopup);
-        
-        const closeSavedPopup = document.getElementById('close-saved-popup');
-        if(closeSavedPopup) closeSavedPopup.addEventListener('click', hideSavedAnimesPopup); 
-        
-        inputs = {
-            username: document.getElementById('username-input'),
-            genres: setupTagInput('genres-input', 'genres-tags', 'bg-indigo-500/80', 'genres-autocomplete', '/api/search_genres'),
-            liked: setupTagInput('liked-input', 'liked-tags', 'bg-green-500/80', 'liked-autocomplete', '/api/search_anime'),
-            disliked: setupTagInput('disliked-input', 'disliked-tags', 'bg-red-500/80', 'disliked-autocomplete', '/api/search_anime')
-        };
+    const rankingPanelContent = document.getElementById('ranking-panel-content');
     
-        generateButton.addEventListener('click', onGenerateReel);
-        exitButton.addEventListener('click', onExitSession);
+    // ▼▼▼ THE FIX IS HERE ▼▼▼
+    // Assigning to the GLOBAL variable, not creating a new local one.
+    rankingPanelContainer = document.getElementById('ranking-panel-container'); 
+
+    function openDashboard() {
+        if (!rankingPanelContainer || !rankingPanelContent) return;
+        rankingPanelContainer.classList.remove('hidden');
+        setTimeout(() => {
+            rankingPanelContent.classList.remove('translate-x-full');
+        }, 10);
+    }
+
+    function closeDashboard() {
+        if (!rankingPanelContainer || !rankingPanelContent) return;
+        rankingPanelContent.classList.add('translate-x-full');
+        setTimeout(() => {
+            rankingPanelContainer.classList.add('hidden');
+        }, 300);
+    }
+
+    if (toggleDashboardButton) toggleDashboardButton.addEventListener('click', openDashboard);
+    if (closeDashboardButton) closeDashboardButton.addEventListener('click', closeDashboard);
+    if (rankingPanelContainer) {
+        rankingPanelContainer.addEventListener('click', (e) => {
+            if (e.target === rankingPanelContainer) closeDashboard();
+        });
+    }
+    
+    // --- 5. Saved Animes Popup Logic (These were missing) ---
+    const showSavedButton = document.getElementById('show-saved-button');
+    if(showSavedButton) showSavedButton.addEventListener('click', showSavedAnimesPopup);
+    
+    const closeSavedPopup = document.getElementById('close-saved-popup');
+    if(closeSavedPopup) closeSavedPopup.addEventListener('click', hideSavedAnimesPopup);
+    
+    const tabsContainer = document.getElementById('saved-tabs-container');
+    if(tabsContainer) {
+        const tabContents = document.querySelectorAll('[data-tab-content]');
+        tabsContainer.addEventListener('click', (e) => {
+            const clickedTab = e.target.closest('.tab-btn');
+            if (!clickedTab) return;
+            const tabId = clickedTab.dataset.tab;
+            tabsContainer.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active-tab'));
+            clickedTab.classList.add('active-tab');
+            tabContents.forEach(content => {
+                content.classList.toggle('hidden', content.dataset.tabContent !== tabId);
+            });
+        });
+    }
+
+
     
 
 
@@ -1088,16 +1140,35 @@ document.addEventListener('mouseup', () => {
 
 </script>
 
-    <div id="saved-animes-popup" class="fixed inset-0 z-[100] hidden bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+<div id="saved-animes-popup" class="fixed inset-0 z-[100] hidden bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
     <div class="relative bg-gray-800 rounded-2xl w-full max-w-md max-h-[80vh] flex flex-col p-6 shadow-2xl">
-        <div class="flex justify-between items-center mb-4">
-            <h3 class="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-500">Your Watchlist</h3>
+        <div class="flex justify-between items-center mb-4 flex-shrink-0">
+            <h3 class="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-500">Your Lists</h3>
             <button id="close-saved-popup" class="p-2 rounded-full hover:bg-gray-700 transition-colors">
                 <i data-lucide="x" class="w-6 h-6"></i>
             </button>
         </div>
-        <div id="saved-animes-list" class="flex-grow overflow-y-auto space-y-3 pr-2">
-            </div>
+
+        <div id="saved-tabs-container" class="flex items-center gap-2 border-b border-gray-700 mb-4 flex-shrink-0">
+            <button data-tab="watchlist" class="tab-btn active-tab flex items-center gap-2 px-4 py-2 text-sm font-semibold text-gray-400 transition-colors hover:text-white">
+                <i data-lucide="bookmark" class="w-4 h-4"></i> Watchlist
+            </button>
+            <button data-tab="super-likes" class="tab-btn flex items-center gap-2 px-4 py-2 text-sm font-semibold text-gray-400 transition-colors hover:text-white">
+                <i data-lucide="sparkles" class="w-4 h-4"></i> Super Likes
+            </button>
+            <button data-tab="likes" class="tab-btn flex items-center gap-2 px-4 py-2 text-sm font-semibold text-gray-400 transition-colors hover:text-white">
+                <i data-lucide="heart" class="w-4 h-4"></i> Likes
+            </button>
+        </div>
+
+        <div class="flex-grow overflow-y-auto space-y-3 pr-2">
+            <div id="watchlist-list" data-tab-content="watchlist" class="">
+                </div>
+            <div id="super-likes-list" data-tab-content="super-likes" class="hidden">
+                </div>
+            <div id="likes-list" data-tab-content="likes" class="hidden">
+                </div>
+        </div>
     </div>
 </div>
 
