@@ -80,6 +80,26 @@
     border-bottom: 2px solid #6366f1; /* indigo-500 */
 }
 
+.overlay-icon {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(1.5);
+    color: rgba(255, 255, 255, 0.8);
+    background-color: rgba(0, 0, 0, 0.4);
+    border-radius: 50%;
+    padding: 16px;
+    z-index: 20;
+    opacity: 0;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    pointer-events: none; /* Allows clicks to go through to the video */
+}
+
+.overlay-icon.visible {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+}
+
 @keyframes popIn {
     0% { transform: scale(1); }
     50% { transform: scale(1.2); }
@@ -176,7 +196,7 @@
     let inputs = {};
     let intersectionObserver;
     let likeClickTracker = { animeId: null, count: 0, timer: null };
-    let activeReelId = null;
+    let activeReelId = null, mouseDownTime = 0;
 
     const statusLight = document.getElementById('api-status-light');
     async function checkApiStatus() {
@@ -674,6 +694,30 @@ async function refreshRecommendations() {
         return { getTags: () => tags };
     }
 
+    function togglePlayPause(animeId) {
+    const player = players[animeId];
+    const iconContainer = document.getElementById(`overlay-icon-${animeId}`);
+    if (!player || !iconContainer) return;
+
+    const playerState = player.getPlayerState();
+    const icon = iconContainer.querySelector('i');
+
+    if (playerState === 1) { // If playing, then pause
+        player.pauseVideo();
+        icon.setAttribute('data-lucide', 'play');
+    } else { // If paused or unstarted, then play
+        player.playVideo();
+        icon.setAttribute('data-lucide', 'pause');
+    }
+    lucide.createIcons(); // Redraw the icon
+
+    // Show the icon and then fade it out
+    iconContainer.classList.add('visible');
+    setTimeout(() => {
+        iconContainer.classList.remove('visible');
+    }, 500);
+}
+
     function createReelItemHTML(anime) {
         if (!anime || !anime.id) return '';
         animeDetailsCache[anime.id] = anime;
@@ -690,6 +734,11 @@ async function refreshRecommendations() {
         return `<div class="reel-item relative h-full w-full flex-shrink-0" data-anime-id="${anime.id}" data-anime-title="${anime.title}">
             <div class="absolute inset-0 bg-black">${anime.trailerId ? `<div id="player-${anime.id}"></div>` : '<div class="w-full h-full flex items-center justify-center text-gray-400">Trailer Not Available</div>'}</div>
             <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent"></div>
+            
+            <div id="overlay-icon-${anime.id}" class="overlay-icon">
+                <i data-lucide="play" class="w-12 h-12"></i>
+             </div>
+
             <div class="absolute right-4 bottom-24 flex flex-col items-center space-y-4 z-10">
                 <button class="action-btn like-btn bg-black/30 p-3 rounded-full hover:bg-pink-500 transition-all" title="Like"><i data-lucide="heart"></i></button>
                 <button class="action-btn save-btn bg-black/30 p-3 rounded-full hover:bg-indigo-500 transition-all" title="Save to Watchlist"><i data-lucide="bookmark"></i></button>
@@ -1001,6 +1050,20 @@ document.addEventListener('DOMContentLoaded', () => {
             if (e.target === rankingPanelContainer) closeDashboard();
         });
     }
+
+    reelContainer.addEventListener('click', async (e) => {
+        // Check if the click was on the reel's main area, not a button
+        if (e.target.closest('.action-btn') || e.target.closest('.show-details-btn')) {
+            // This is a button click, handle it normally
+            // The existing logic for this is already below, so just return
+            return;
+        }
+
+        // If the click is on the video area, toggle play/pause
+        if (activeReelId) {
+            togglePlayPause(activeReelId);
+        }
+    });
     
     // --- 5. Saved Animes Popup Logic (These were missing) ---
     const showSavedButton = document.getElementById('show-saved-button');
@@ -1069,18 +1132,72 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
+// --- Consolidated Reel Interaction Logic ---
+reelContainer.addEventListener('mousedown', (e) => {
+    // Ignore if the press starts on a button
+    if (e.target.closest('.action-btn') || e.target.closest('.show-details-btn')) {
+        mouseDownTime = 0; // Reset time to prevent misfiring
+        return;
+    }
+    
+    // Record the time of the mousedown
+    mouseDownTime = new Date().getTime();
+
+    // Handle the double-speed logic (only for the right side)
+    if (e.clientX > reelContainer.offsetWidth / 2) {
+        if (currentlyVisibleReel) {
+            const activePlayer = players[currentlyVisibleReel.dataset.animeId];
+            if (activePlayer && typeof activePlayer.setPlaybackRate === 'function') {
+                activePlayer.setPlaybackRate(2);
+            }
+        }
+    }
+});
+
+reelContainer.addEventListener('mouseup', (e) => {
+    // Always reset playback rate on mouseup, regardless of hold duration
+    if (currentlyVisibleReel) {
+        const activePlayer = players[currentlyVisibleReel.dataset.animeId];
+        if (activePlayer && typeof activePlayer.setPlaybackRate === 'function') {
+            activePlayer.setPlaybackRate(1);
+        }
+    }
+
+    // Ignore if the release is on a button or if mousedown was on a button
+    if (e.target.closest('.action-btn') || e.target.closest('.show-details-btn') || mouseDownTime === 0) {
+        return;
+    }
+
+    const pressDuration = new Date().getTime() - mouseDownTime;
+    const CLICK_THRESHOLD = 200; // A click is less than 200ms
+
+    // If the press was very short, treat it as a click to toggle play/pause
+    if (pressDuration < CLICK_THRESHOLD) {
+        if (activeReelId) {
+            // Make sure the click was not on the right side of the screen
+            if (e.clientX <= reelContainer.offsetWidth / 2) {
+                 togglePlayPause(activeReelId);
+            }
+        }
+    }
+});
+
+// This handles the regular button clicks for like, save, etc.
 reelContainer.addEventListener('click', async (e) => {
     const detailsBtn = e.target.closest('.show-details-btn');
     if (detailsBtn) {
         detailsBtn.closest('.reel-item').querySelector('.details-panel').classList.toggle('hidden');
         return;
     }
+    
     const btn = e.target.closest('.action-btn');
     if (!btn) return;
+    
     const reelItem = btn.closest('.reel-item');
     if (!reelItem) return;
 
-    // Add animation effect
+    // The rest of your original button-handling logic goes here...
+    // (This part is unchanged)
     btn.classList.add('pop-in');
     setTimeout(() => { btn.classList.remove('pop-in'); }, 200);
 
@@ -1116,28 +1233,7 @@ reelContainer.addEventListener('click', async (e) => {
         return;
     }
 });
-
-reelContainer.addEventListener('mousedown', (e) => {
-     if (e.target.closest('.action-btn') || e.target.closest('.show-details-btn')) return;
-     if (e.clientX > reelContainer.offsetWidth / 2) {
-         if (currentlyVisibleReel) {
-             const activePlayer = players[currentlyVisibleReel.dataset.animeId];
-             if (activePlayer && typeof activePlayer.setPlaybackRate === 'function') {
-                 activePlayer.setPlaybackRate(2);
-             }
-         }
-     }
 });
-document.addEventListener('mouseup', () => {
-    if (currentlyVisibleReel) {
-        const activePlayer = players[currentlyVisibleReel.dataset.animeId];
-        if (activePlayer && typeof activePlayer.setPlaybackRate === 'function') {
-            activePlayer.setPlaybackRate(1);
-        }
-    }
-});
-});
-
 </script>
 
 <div id="saved-animes-popup" class="fixed inset-0 z-[100] hidden bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
