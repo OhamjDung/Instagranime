@@ -96,7 +96,7 @@
 
     <div class="flex-grow h-full relative">
         <div id="setup-screen" class="min-h-full flex flex-col items-center justify-center p-4 transition-opacity duration-500">
-            <div class="w-full max-w-2xl mx-auto bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 md:p-8 shadow-2xl border border-gray-700 fade-in">
+            <div class="w-full max-w-2xl mx-auto bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 md:p-8 shadow-2xl border border-gray-700 fade-in max-h-[90vh] overflow-y-auto">
                 <div class="text-center mb-8"><h1 class="text-3xl md:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-500">AnimeReels</h1><p class="text-gray-300 mt-2">Tell us your tastes to create your personalized reel.</p></div>
                 <div class="mb-4"><label class="block text-sm font-medium text-gray-200 mb-2">Your Username (for this session)</label><input id="username-input" type="text" placeholder="Enter a temporary username..." class="w-full bg-gray-900 rounded-lg p-3 border border-gray-700 focus:ring-2 focus:ring-indigo-500 outline-none"></div>
                 <div class="mb-4 relative"><label class="block text-sm font-medium text-gray-200 mb-2">Must-Have Genres</label><div class="bg-gray-900 rounded-lg p-2 flex flex-wrap items-center border border-gray-700 focus-within:ring-2 focus-within:ring-indigo-500"><div id="genres-tags" class="flex flex-wrap"></div><input id="genres-input" type="text" placeholder="Type genre and press Enter..." class="bg-transparent text-white outline-none flex-grow p-2 min-w-[150px]"></div><div id="genres-autocomplete" class="autocomplete-results hidden"></div></div>
@@ -130,21 +130,30 @@
         <button id="show-saved-button" title="Show Saved Animes" class="bg-black/30 p-2.5 rounded-full hover:bg-black/50 transition-all">
             <i data-lucide="bookmark-check" class="w-5 h-5"></i>
         </button>
+            <button id="toggle-dashboard-button" title="Show Dashboard" class="bg-black/30 p-2.5 rounded-full hover:bg-black/50 transition-all md:hidden">
+        <i data-lucide="layout-dashboard" class="w-5 h-5"></i>
+    </button>
 
     </div>
     
 </div>
     </div>
     
-    <div id="ranking-panel-container" class="w-64 bg-gray-800/50 border-l border-gray-700 h-full flex-shrink-0 p-4 hidden ranking-panel overflow-y-auto">
-        <h3 class="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-500 mb-4">Your Dashboard</h3>
-        <div id="ranking-list"></div>
+<div id="ranking-panel-container" class="fixed top-0 right-0 h-full w-full max-w-sm bg-gray-800/80 backdrop-blur-sm border-l border-gray-700 z-40 p-4 ranking-panel overflow-y-auto transform translate-x-full transition-transform duration-300 ease-in-out md:relative md:w-64 md:translate-x-0 md:flex-shrink-0 md:flex md:flex-col">
+    <div class="flex justify-between items-center mb-4">
+        <h3 class="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-500">Your Dashboard</h3>
+        <button id="close-dashboard-button" class="p-2 -mr-2 rounded-full hover:bg-gray-700 transition-colors md:hidden">
+            <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
     </div>
+    <div id="ranking-list" class="flex-grow"></div>
+</div>
 
     <script src="https://www.youtube.com/iframe_api"></script>
  <script src="https://www.youtube.com/iframe_api"></script>
 <script>
-    const API_BASE_URL = 'http://127.0.0.1:5000';
+    // const API_BASE_URL = 'https://instagranime-1.onrender.com';
+    const API_BASE_URL = 'http://127.0.0.1:5000'
     
     let currentUserId = null, players = {}, recommendationScores = {}, recommendationSignals = {}, seenAnimeIds = new Set(), isRefreshing = false, currentlyVisibleReel = null, progressCheckIntervals = {}, animeDetailsCache = {};
     let isApiReady = false, isFeedbackLocked = false;
@@ -480,13 +489,20 @@ async function refreshRecommendations() {
         let tags = [];
         let debounceTimer;
 
+        // --- NEW STATE MANAGEMENT FOR SUGGESTIONS ---
         const suggestionsContainer = document.getElementById('liked-suggestions-container');
         const suggestionsDiv = document.getElementById('liked-suggestions');
+        let suggestionCache = []; // Holds the full list of 6 suggestions from the API
+        let currentlyDisplayedSuggestions = []; // Holds the 3 suggestions visible on screen
         let suggestionDebounceTimer;
+        let globallyDismissedSuggestions = new Set();
+        // --- END NEW STATE ---
 
         async function fetchSuggestions() {
             if (tags.length === 0) {
                 suggestionsContainer.classList.add('hidden');
+                suggestionCache = [];
+                currentlyDisplayedSuggestions = [];
                 return;
             }
             try {
@@ -497,33 +513,84 @@ async function refreshRecommendations() {
                 });
                 if (!response.ok) return;
                 const data = await response.json();
-                renderSuggestions(data.suggestions || []);
+                
+                const newSuggestions = data.suggestions || [];
+                
+                // THE FIX: Correctly filter the new suggestions against our global "dismissed" list.
+                // The previous version had a typo here ("newSuggestions.filter" was missing).
+                suggestionCache = newSuggestions.filter(s => !globallyDismissedSuggestions.has(s));
+                
+                currentlyDisplayedSuggestions = suggestionCache.splice(0, 3);
+                renderSuggestions();
+
             } catch (error) {
                 console.error("Failed to fetch suggestions:", error);
             }
         }
 
-        function renderSuggestions(suggestions) {
+        // NEW: Handles removing a suggestion and replacing it with one from the cache.
+          function dismissAndReplaceSuggestion(suggestionToRemove) {
+            // Remove the dismissed suggestion from the currently displayed list
+
+            globallyDismissedSuggestions.add(suggestionToRemove);
+
+            currentlyDisplayedSuggestions = currentlyDisplayedSuggestions.filter(s => s !== suggestionToRemove);
+
+            // If the cache has more items, pull the next one to display
+            if (suggestionCache.length > 0) {
+                const nextSuggestion = suggestionCache.shift(); // Takes the first item from the cache
+                currentlyDisplayedSuggestions.push(nextSuggestion);
+            }
+            // THE KEY CHANGE: The "else if" block that called fetchSuggestions() is now gone.
+            // If the cache is empty, the list of suggestions will simply shrink, as requested.
+            
+            // Re-render the UI with the updated list of suggestions
+            renderSuggestions();
+        }
+
+        // UPDATED: Renders the suggestions and attaches the new event listeners.
+        function renderSuggestions() {
             suggestionsDiv.innerHTML = '';
-            if (suggestions.length > 0) {
+            if (currentlyDisplayedSuggestions.length > 0) {
                 suggestionsContainer.classList.remove('hidden');
-                suggestions.forEach(suggestion => {
-                    if (tags.includes(suggestion)) return;
+                currentlyDisplayedSuggestions.forEach(suggestion => {
+                    // Don't show a suggestion if it's already a liked tag
+                    if (tags.includes(suggestion)) {
+                        // If a displayed suggestion was just added, immediately replace it
+                        dismissAndReplaceSuggestion(suggestion);
+                        return; // Stop this render loop and let the recursive call handle it
+                    }
+
                     const suggestionEl = document.createElement('div');
                     suggestionEl.className = 'suggestion-tag';
-                    suggestionEl.innerHTML = `<span>${suggestion}</span><svg class="plus-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
+                    suggestionEl.textContent = suggestion;
+                    
+                    const removeIcon = document.createElement('div');
+                    removeIcon.className = "ml-2 cursor-pointer";
+                    removeIcon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+
+                    // Event listener for DISMISSING a suggestion
+                    removeIcon.addEventListener('click', (e) => {
+                        e.stopPropagation(); // Prevents the whole tag from being clicked
+                        dismissAndReplaceSuggestion(suggestion);
+                    });
+
+                    suggestionEl.appendChild(removeIcon);
+                    
+                    // Event listener for ADDING a suggestion
                     suggestionEl.addEventListener('click', () => {
                         addTag(suggestion);
-                        // Re-fetch suggestions after adding one, instead of just removing the element
-                        clearTimeout(suggestionDebounceTimer);
-                        suggestionDebounceTimer = setTimeout(fetchSuggestions, 100);
+                        // The `addTag` function will trigger a re-render automatically
                     });
+
                     suggestionsDiv.appendChild(suggestionEl);
                 });
             } else {
                 suggestionsContainer.classList.add('hidden');
             }
         }
+        
+        // --- Functions below are mostly unchanged, but `addTag` now triggers suggestion logic ---
 
         input.addEventListener('input', () => {
             clearTimeout(debounceTimer);
@@ -568,7 +635,12 @@ async function refreshRecommendations() {
             if (!tags.includes(label)) {
                 tags.push(label);
                 renderTags();
+
                 if (inputId === 'liked-input') {
+                    // THE FIX: Add the new tag to the dismissed list *before* fetching.
+                    // This ensures the new suggestions are filtered correctly.
+                    globallyDismissedSuggestions.add(label);
+                    
                     clearTimeout(suggestionDebounceTimer);
                     suggestionDebounceTimer = setTimeout(fetchSuggestions, 500);
                 }
@@ -869,6 +941,21 @@ function showSavedAnimesPopup() {
         exitButton = document.getElementById('exit-session-button');
         rankingPanelContainer = document.getElementById('ranking-panel-container');
         initialLoadingOverlay = document.getElementById('initial-loading-overlay');
+
+        const toggleDashboardButton = document.getElementById('toggle-dashboard-button');
+    const closeDashboardButton = document.getElementById('close-dashboard-button');
+
+    if (toggleDashboardButton && rankingPanelContainer) {
+        toggleDashboardButton.addEventListener('click', () => {
+            rankingPanelContainer.classList.remove('translate-x-full');
+        });
+    }
+
+    if (closeDashboardButton && rankingPanelContainer) {
+        closeDashboardButton.addEventListener('click', () => {
+            rankingPanelContainer.classList.add('translate-x-full');
+        });
+    }
         
         // Remove references to mute button and overlay if they don't exist
         const showSavedButton = document.getElementById('show-saved-button');

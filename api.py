@@ -68,10 +68,10 @@ def get_youtube_id_from_url(url):
 @app.route('/api/suggest', methods=['POST'])
 def suggest_anime():
     """
-    Receives a list of liked anime titles and returns the top 3 most similar anime
-    based on cosine similarity of their feature vectors.
+    Receives a list of liked anime titles and returns the top 3 most similar anime,
+    robustly excluding any anime from the same franchise as those already liked.
+    This version fetches base_title data on-demand and does NOT require it in the .pkl file.
     """
-    # Ensure the model and data assets are loaded before proceeding.
     if not ASSETS_LOADED:
         return jsonify({"error": "API assets are not loaded."}), 503
 
@@ -81,53 +81,78 @@ def suggest_anime():
 
     liked_anime_titles = data['liked_animes']
     if not liked_anime_titles:
-        return jsonify({"suggestions": []}) # Return empty if the input list is empty
+        return jsonify({"suggestions": []})
 
+    connection = get_db_connection()
+    if not connection:
+        return jsonify({"error": "Database connection failed for suggestions."}), 500
+    
     try:
-        # --- 1. Convert liked anime titles to their corresponding IDs ---
-        title_map = get_title_to_id_map(liked_anime_titles)
-        liked_anime_ids = [title_map.get(t) for t in liked_anime_titles if t in title_map]
-        
-        # --- 2. Get the feature vectors for the liked anime ---
-        liked_indices = [id_to_index[anime_id] for anime_id in liked_anime_ids if anime_id in id_to_index]
-        if not liked_indices:
-            return jsonify({"suggestions": []}) # No matching anime found in our data
+        with connection.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
+            # --- 1. Get the base titles of the anime the user has entered. ---
+            cursor.execute(
+                """
+                SELECT DISTINCT base_title
+                FROM animes
+                WHERE (title = ANY(%s) OR title_english = ANY(%s)) AND base_title IS NOT NULL
+                """,
+                (liked_anime_titles, liked_anime_titles)
+            )
+            liked_base_titles_set = {row['base_title'] for row in cursor.fetchall()}
+
+            # --- 2. Get feature vectors and user taste profile ---
+            title_map = get_title_to_id_map(liked_anime_titles)
+            liked_anime_ids = [title_map.get(t) for t in liked_anime_titles if t in title_map]
             
-        # Create an average vector representing the user's taste profile
-        user_taste_vector = np.mean([feature_matrix[i] for i in liked_indices], axis=0).reshape(1, -1)
-        
-        # --- 3. Calculate similarity between the user's taste and all other anime ---
-        similarity_scores = cosine_similarity(user_taste_vector, feature_matrix)[0]
-        
-        # --- 4. Rank anime and get the top suggestions ---
-        # Pair each anime index with its similarity score
-        scored_indices = list(enumerate(similarity_scores))
-        
-        # Sort by score in descending order
-        sorted_scored_indices = sorted(scored_indices, key=lambda x: x[1], reverse=True)
-        
-        # --- 5. Filter and format the results ---
-        suggestions = []
-        # Create a set of liked titles for efficient lookup
-        liked_titles_set = set(liked_anime_titles)
-        
-        for index, score in sorted_scored_indices:
-            # Stop when we have 3 suggestions
-            if len(suggestions) >= 3:
-                break
+            liked_indices = [id_to_index[anime_id] for anime_id in liked_anime_ids if anime_id in id_to_index]
+            if not liked_indices:
+                return jsonify({"suggestions": []})
             
-            anime_info = anime_df.iloc[index]
-            suggestion_title = anime_info.get('title_english') or anime_info.get('title')
+            user_taste_vector = np.mean([feature_matrix[i] for i in liked_indices], axis=0).reshape(1, -1)
             
-            # Ensure the suggestion is not an anime the user has already liked
-            if suggestion_title not in liked_titles_set:
-                suggestions.append(suggestion_title)
+            # --- 3. Calculate similarity and rank all anime ---
+            similarity_scores = cosine_similarity(user_taste_vector, feature_matrix)[0]
+            sorted_scored_indices = sorted(list(enumerate(similarity_scores)), key=lambda x: x[1], reverse=True)
+            
+            # --- 4. Fetch base_titles for top candidates from the DB ---
+            # Get the anime_ids of the top 50 potential candidates.
+            # FIX: Convert numpy.int64 to standard Python int for the database query.
+            candidate_ids = [int(anime_df.iloc[index].get('anime_id')) for index, score in sorted_scored_indices[:50]]
+            
+            id_to_base_title_map = {}
+            if candidate_ids:
+                cursor.execute(
+                    "SELECT anime_id, base_title FROM animes WHERE anime_id = ANY(%s)",
+                    (candidate_ids,)
+                )
+                id_to_base_title_map = {row['anime_id']: row['base_title'] for row in cursor.fetchall()}
+
+            # --- 5. Filter results using the on-demand data ---
+            suggestions = []
+            seen_suggestion_base_titles = set()
+            
+            for index, score in sorted_scored_indices:
+                if len(suggestions) >= 6:
+                    break
+                
+                anime_info = anime_df.iloc[index]
+                suggestion_id = anime_info.get('anime_id')
+                
+                suggestion_base_title = id_to_base_title_map.get(suggestion_id)
+                
+                if suggestion_base_title and suggestion_base_title not in liked_base_titles_set and suggestion_base_title not in seen_suggestion_base_titles:
+                    suggestion_title = anime_info.get('title_english') or anime_info.get('title')
+                    suggestions.append(suggestion_title)
+                    seen_suggestion_base_titles.add(suggestion_base_title)
 
         return jsonify({"suggestions": suggestions})
 
     except Exception as e:
         print(f"❌ Error in /api/suggest: {e}")
         return jsonify({"error": "An internal error occurred while generating suggestions."}), 500
+    finally:
+        if connection:
+            connection.close()
 
 @app.route('/api/status', methods=['GET'])
 def status_check():
@@ -168,8 +193,8 @@ def search_anime():
     finally:
         if connection: cursor.close(); connection.close()
 
-@app.route('/api/generate_reel', methods=['POST'])
 # UPDATED: generate_reel function with robust filtering.
+@app.route('/api/generate_reel', methods=['POST'])
 @app.route('/api/generate_reel', methods=['POST'])
 def generate_reel():
     if not ASSETS_LOADED: return jsonify({"error": "Model not available."}), 503
@@ -201,7 +226,6 @@ def generate_reel():
         disliked_from_db = {int(i) for i in user_profile.get('disliked_ids', [])}
         scrolled_from_db = {int(i) for i in user_profile.get('scrolled_past_ids', [])}
         
-        # FIX: Create a single, definitive exclusion set from all sources.
         final_exclusion_set = seen_from_client | liked_from_db | disliked_from_db | scrolled_from_db
         
         if not liked_anime_ids:
@@ -223,11 +247,11 @@ def generate_reel():
                     df_pool = df_pool[df_pool['genre_list'].apply(lambda g_list: isinstance(g_list, list) and required_genres.issubset(set(g_list)))]
 
                 all_possible_ids = set(df_pool['anime_id'])
-                
-                # FIX: Explicitly and consistently filter the candidate pool before scoring.
                 candidate_ids = list(all_possible_ids - final_exclusion_set)
                 
-                ranked_recs = predict_scores_for_candidates(candidate_ids, user_profile_vector, top_genres, studio_prefs, limit=15)
+                # We fetch more candidates than needed (e.g., 50) to have enough to filter from.
+                ranked_recs = predict_scores_for_candidates(candidate_ids, user_profile_vector, top_genres, studio_prefs, limit=50)
+
                 if is_new_user_session and liked_indices:
                     initial_taste_vector = np.mean([feature_matrix[i] for i in liked_indices], axis=0).reshape(1, -1)
                     boosted_recs = []
@@ -242,7 +266,30 @@ def generate_reel():
                     ranked_recs = sorted(boosted_recs, key=lambda x: x['score'], reverse=True)
                 recommendation_type = "personalized_model"
         
-        final_response = format_response_with_reviews(ranked_recs)
+        # =========================================================================================
+        # NEW: Filter recommendations to ensure only one anime per franchise using 'base_title'
+        # =========================================================================================
+        final_filtered_recs = []
+        seen_franchises = set()
+        recommendation_limit = 15 # The desired number of unique recommendations for the reel
+
+        for rec in ranked_recs:
+            # Stop once we have enough unique recommendations
+            if len(final_filtered_recs) >= recommendation_limit:
+                break
+            
+            # This requires 'base_title' to be in your anime_df DataFrame (and rec['anime'] dictionary)
+            base_title = rec['anime'].get('base_title')
+            
+            # If the franchise hasn't been seen yet, add it to our final list and track the franchise
+            if base_title and base_title not in seen_franchises:
+                final_filtered_recs.append(rec)
+                seen_franchises.add(base_title)
+        # =========================================================================================
+
+        # Now, use the de-duplicated list for the final response
+        final_response = format_response_with_reviews(final_filtered_recs)
+        
         return jsonify({"user_id": user_id, "recommendations": final_response, "recommendation_type": recommendation_type})
     except Exception as e:
         print(f"Error in generate_reel: {e}")

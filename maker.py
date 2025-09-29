@@ -32,13 +32,14 @@ def get_db_connection():
 
 def load_anime_data(connection):
     print("Loading anime data from database...")
-    # MODIFIED: Added title_english and promo_link to ensure they are in the final .pkl file
+    # MODIFIED: Added 'base_title' to the SQL query
     query = """
         SELECT 
             a.anime_id,
             a.title,
-            a.title_english,       -- <<< ADDED THIS
-            a.promo_link,          -- <<< ADDED THIS
+            a.title_english,
+            a.base_title,          -- <<< ADDED THIS LINE
+            a.promo_link,
             a.studio,
             a.positive_keywords, 
             a.negative_keywords,
