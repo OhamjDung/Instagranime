@@ -1,4 +1,4 @@
-  Instagranime - A Personalized Anime Recommendation Engine
+  Instagranime - A Personalized Anime Recommendation Engine - Try it out! https://remarkable-mochi-f3ac4b.netlify.app/
 
 Project Overview
 ----------------
